@@ -2,42 +2,45 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "python-docker:${BUILD_NUMBER}"
+        AWS_DEFAULT_REGION = 'us-east-1'
+        IMAGE_NAME = "python-docker"
+        ECR_ACCOUNT_ID = "975050343222"
+        ECR_REPO = "${ECR_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${IMAGE_NAME}"
     }
 
     stages {
         stage('Checkout') {
             steps {
-                echo '🔄 Checking out code...'
                 checkout scm
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo "🐳 Building Docker image: ${IMAGE_NAME}"
-                sh 'docker build -t $IMAGE_NAME .'
+                script {
+                    sh 'docker build -t $IMAGE_NAME:$BUILD_NUMBER .'
+                }
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Login to ECR') {
             steps {
-                echo "📦 Simulating image push to ECR: ${IMAGE_NAME}"
-                echo "This would be: docker push <account>.dkr.ecr.<region>.amazonaws.com/$IMAGE_NAME"
+                withCredentials([usernamePassword(credentialsId: 'aws-ecr-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    sh '''
+                        aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                        aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                        aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+                    '''
+                }
             }
         }
 
-        stage('Deploy to QA') {
+        stage('Tag and Push to ECR') {
             steps {
-                echo "🚀 Simulating deploy to EKS QA cluster"
-                echo "This would be: helm upgrade --install myapp ./helm-chart"
-            }
-        }
-
-        stage('Post Actions') {
-            steps {
-                echo "✅ Build complete. Notifying team..."
-                echo "🧹 Cleaning up build resources..."
+                sh '''
+                    docker tag $IMAGE_NAME:$BUILD_NUMBER $ECR_REPO:$BUILD_NUMBER
+                    docker push $ECR_REPO:$BUILD_NUMBER
+                '''
             }
         }
     }
